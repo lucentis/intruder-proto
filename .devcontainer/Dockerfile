@@ -1,4 +1,4 @@
-FROM mcr.microsoft.com/devcontainers/java:1-17-bookworm
+FROM mcr.microsoft.com/devcontainers/java:17-bookworm
 
 ARG ANDROID_CMDLINE_TOOLS_VERSION=15859902
 ARG ANDROID_CMDLINE_TOOLS_SHA256=4e4c464f145a7512b57d088ac6c278c03c9eea610886b35a5e0804e74eedf583
@@ -25,7 +25,7 @@ RUN set -eux; \
     yes | sdkmanager --sdk_root="${ANDROID_HOME}" --licenses >/dev/null; \
     sdkmanager --sdk_root="${ANDROID_HOME}" \
       "platform-tools" \
-      "platforms;android-36" \
+      "platforms;android-37.0" \
       "build-tools;36.0.0"; \
     chown -R vscode:vscode "${ANDROID_HOME}"
 

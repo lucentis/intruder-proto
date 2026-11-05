@@ -5,7 +5,7 @@ plugins {
 
 android {
     namespace = "fr.lucentis.intruderproto"
-    compileSdk = 36
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "fr.lucentis.intruderproto"
