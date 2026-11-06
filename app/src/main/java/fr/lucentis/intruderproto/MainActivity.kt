@@ -1,4 +1,3 @@
-
 package fr.lucentis.intruderproto
 
 import android.app.admin.DevicePolicyManager
@@ -25,6 +24,7 @@ import androidx.compose.ui.unit.dp
 class MainActivity : ComponentActivity() {
 
     private val adminActive = mutableStateOf(false)
+    private val lastLoginEvent = mutableStateOf<String?>(null)
 
     private val adminRequest = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -47,13 +47,10 @@ class MainActivity : ComponentActivity() {
             IntruderDeviceAdminReceiver::class.java
         )
 
-        val manager = getSystemService(DevicePolicyManager::class.java)
-
-        adminActive.value = manager.isAdminActive(component)
-
         setContent {
             IntruderProtoApp(
                 isAdminActive = adminActive.value,
+                lastLoginEvent = lastLoginEvent.value,
                 onActivateAdmin = {
                     val intent = Intent(
                         DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN
@@ -73,11 +70,33 @@ class MainActivity : ComponentActivity() {
             )
         }
     }
+
+    override fun onResume() {
+        super.onResume()
+
+        val component = ComponentName(
+            this,
+            IntruderDeviceAdminReceiver::class.java
+        )
+
+        val manager = getSystemService(DevicePolicyManager::class.java)
+
+        adminActive.value = manager.isAdminActive(component)
+
+        lastLoginEvent.value = getSharedPreferences(
+            IntruderDeviceAdminReceiver.PREFERENCES_NAME,
+            MODE_PRIVATE
+        ).getString(
+            IntruderDeviceAdminReceiver.KEY_LAST_EVENT,
+            null
+        )
+    }
 }
 
 @Composable
 private fun IntruderProtoApp(
     isAdminActive: Boolean,
+    lastLoginEvent: String?,
     onActivateAdmin: () -> Unit
 ) {
     MaterialTheme {
@@ -108,6 +127,20 @@ private fun IntruderProtoApp(
                         "Surveillance administrateur activée."
                     } else {
                         "Surveillance administrateur inactive."
+                    },
+                    modifier = Modifier.padding(top = 16.dp)
+                )
+
+                Text(
+                    text = when (lastLoginEvent) {
+                        IntruderDeviceAdminReceiver.EVENT_FAILED ->
+                            "Dernier événement : tentative échouée."
+
+                        IntruderDeviceAdminReceiver.EVENT_SUCCEEDED ->
+                            "Dernier événement : déverrouillage réussi après un échec."
+
+                        else ->
+                            "Aucun événement détecté pour le moment."
                     },
                     modifier = Modifier.padding(top = 16.dp)
                 )
