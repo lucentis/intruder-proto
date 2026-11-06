@@ -1,8 +1,10 @@
 package fr.lucentis.intruderproto
 
+import android.Manifest
 import android.app.admin.DevicePolicyManager
 import android.content.ComponentName
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -24,19 +26,20 @@ import androidx.compose.ui.unit.dp
 class MainActivity : ComponentActivity() {
 
     private val adminActive = mutableStateOf(false)
+    private val cameraPermissionGranted = mutableStateOf(false)
     private val lastLoginEvent = mutableStateOf<String?>(null)
+    private val lastCaptureStatus = mutableStateOf<String?>(null)
 
     private val adminRequest = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) {
-        val component = ComponentName(
-            this,
-            IntruderDeviceAdminReceiver::class.java
-        )
+        refreshStatus()
+    }
 
-        val manager = getSystemService(DevicePolicyManager::class.java)
-
-        adminActive.value = manager.isAdminActive(component)
+    private val cameraPermissionRequest = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) {
+        refreshStatus()
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -50,7 +53,9 @@ class MainActivity : ComponentActivity() {
         setContent {
             IntruderProtoApp(
                 isAdminActive = adminActive.value,
+                cameraPermissionGranted = cameraPermissionGranted.value,
                 lastLoginEvent = lastLoginEvent.value,
+                lastCaptureStatus = lastCaptureStatus.value,
                 onActivateAdmin = {
                     val intent = Intent(
                         DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN
@@ -66,6 +71,11 @@ class MainActivity : ComponentActivity() {
                     }
 
                     adminRequest.launch(intent)
+                },
+                onRequestCameraPermission = {
+                    cameraPermissionRequest.launch(
+                        Manifest.permission.CAMERA
+                    )
                 }
             )
         }
@@ -73,7 +83,10 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        refreshStatus()
+    }
 
+    private fun refreshStatus() {
         val component = ComponentName(
             this,
             IntruderDeviceAdminReceiver::class.java
@@ -83,11 +96,22 @@ class MainActivity : ComponentActivity() {
 
         adminActive.value = manager.isAdminActive(component)
 
-        lastLoginEvent.value = getSharedPreferences(
+        cameraPermissionGranted.value =
+            checkSelfPermission(Manifest.permission.CAMERA) ==
+            PackageManager.PERMISSION_GRANTED
+
+        val preferences = getSharedPreferences(
             IntruderDeviceAdminReceiver.PREFERENCES_NAME,
             MODE_PRIVATE
-        ).getString(
+        )
+
+        lastLoginEvent.value = preferences.getString(
             IntruderDeviceAdminReceiver.KEY_LAST_EVENT,
+            null
+        )
+
+        lastCaptureStatus.value = preferences.getString(
+            CameraCaptureService.KEY_LAST_CAPTURE_STATUS,
             null
         )
     }
@@ -96,8 +120,11 @@ class MainActivity : ComponentActivity() {
 @Composable
 private fun IntruderProtoApp(
     isAdminActive: Boolean,
+    cameraPermissionGranted: Boolean,
     lastLoginEvent: String?,
-    onActivateAdmin: () -> Unit
+    lastCaptureStatus: String?,
+    onActivateAdmin: () -> Unit,
+    onRequestCameraPermission: () -> Unit
 ) {
     MaterialTheme {
         Surface(
@@ -132,6 +159,15 @@ private fun IntruderProtoApp(
                 )
 
                 Text(
+                    text = if (cameraPermissionGranted) {
+                        "Autorisation caméra accordée."
+                    } else {
+                        "Autorisation caméra non accordée."
+                    },
+                    modifier = Modifier.padding(top = 16.dp)
+                )
+
+                Text(
                     text = when (lastLoginEvent) {
                         IntruderDeviceAdminReceiver.EVENT_FAILED ->
                             "Dernier événement : tentative échouée."
@@ -145,11 +181,25 @@ private fun IntruderProtoApp(
                     modifier = Modifier.padding(top = 16.dp)
                 )
 
+                Text(
+                    text = "Résultat de la capture : ${
+                        lastCaptureStatus ?: "Aucun essai pour le moment."
+                    }",
+                    modifier = Modifier.padding(top = 16.dp)
+                )
+
                 Button(
                     onClick = onActivateAdmin,
                     modifier = Modifier.padding(top = 24.dp)
                 ) {
                     Text("Activer la surveillance")
+                }
+
+                Button(
+                    onClick = onRequestCameraPermission,
+                    modifier = Modifier.padding(top = 12.dp)
+                ) {
+                    Text("Autoriser la caméra")
                 }
             }
         }
