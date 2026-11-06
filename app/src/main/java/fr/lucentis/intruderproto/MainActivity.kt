@@ -16,6 +16,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -23,23 +24,37 @@ import androidx.compose.ui.unit.dp
 
 class MainActivity : ComponentActivity() {
 
+    private val adminActive = mutableStateOf(false)
+
     private val adminRequest = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) {
-        // On vérifiera le résultat de l'activation à l'étape suivante.
+        val component = ComponentName(
+            this,
+            IntruderDeviceAdminReceiver::class.java
+        )
+
+        val manager = getSystemService(DevicePolicyManager::class.java)
+
+        adminActive.value = manager.isAdminActive(component)
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
+        val component = ComponentName(
+            this,
+            IntruderDeviceAdminReceiver::class.java
+        )
+
+        val manager = getSystemService(DevicePolicyManager::class.java)
+
+        adminActive.value = manager.isAdminActive(component)
+
         setContent {
             IntruderProtoApp(
+                isAdminActive = adminActive.value,
                 onActivateAdmin = {
-                    val component = ComponentName(
-                        this,
-                        IntruderDeviceAdminReceiver::class.java
-                    )
-
                     val intent = Intent(
                         DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN
                     ).apply {
@@ -62,6 +77,7 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 private fun IntruderProtoApp(
+    isAdminActive: Boolean,
     onActivateAdmin: () -> Unit
 ) {
     MaterialTheme {
@@ -85,6 +101,15 @@ private fun IntruderProtoApp(
                     text = "Le socle Android est prêt.",
                     modifier = Modifier.padding(top = 8.dp),
                     style = MaterialTheme.typography.bodyLarge
+                )
+
+                Text(
+                    text = if (isAdminActive) {
+                        "Surveillance administrateur activée."
+                    } else {
+                        "Surveillance administrateur inactive."
+                    },
+                    modifier = Modifier.padding(top = 16.dp)
                 )
 
                 Button(
