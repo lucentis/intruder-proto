@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">Intruder Proto</string>
+    <string name="device_admin_description">Surveille les tentatives de déverrouillage du téléphone afin de détecter les échecs et les réussites.</string>
+</resources>
