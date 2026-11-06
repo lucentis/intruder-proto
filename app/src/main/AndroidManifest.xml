@@ -39,6 +39,17 @@
 
         </receiver>
 
+        <receiver
+            android:name=".UserPresentReceiver"
+            android:enabled="true"
+            android:exported="true">
+
+            <intent-filter>
+                <action android:name="android.intent.action.USER_PRESENT" />
+            </intent-filter>
+
+        </receiver>
+
         <service
             android:name=".CameraCaptureService"
             android:exported="false"
