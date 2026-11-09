@@ -1,3 +1,4 @@
+
 package fr.lucentis.intruderproto
 
 import android.Manifest
@@ -7,20 +8,18 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -44,7 +43,11 @@ class MainActivity : ComponentActivity() {
     private val lastLoginEvent = mutableStateOf<String?>(null)
     private val lastCaptureStatus = mutableStateOf<String?>(null)
     private val lastCaptureImage = mutableStateOf<Bitmap?>(null)
-    private val lastUnlockSuccessTime = mutableStateOf<Long?>(null)
+
+    private val monitorRunning = UnlockMonitorService.running
+    private val lastUnlockSuccessTime =
+        UnlockMonitorService.lastUnlockSuccessTime
+    private val monitorError = UnlockMonitorService.lastError
 
     private val adminRequest = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -73,17 +76,9 @@ class MainActivity : ComponentActivity() {
                 lastLoginEvent = lastLoginEvent.value,
                 lastCaptureStatus = lastCaptureStatus.value,
                 lastCaptureImage = lastCaptureImage.value,
-                lastUnlockSuccessTime = UnlockMonitorService.lastUnlockSuccessTime.value
-                    ?: lastUnlockSuccessTime.value,
-                unlockMonitorRunning = UnlockMonitorService.running.value,
-                unlockMonitorError = UnlockMonitorService.lastError.value,
-                onToggleUnlockMonitor = {
-                    if (UnlockMonitorService.running.value) {
-                        stopUnlockMonitor()
-                    } else {
-                        startUnlockMonitor()
-                    }
-                },
+                monitorRunning = monitorRunning.value,
+                lastUnlockSuccessTime = lastUnlockSuccessTime.value,
+                monitorError = monitorError.value,
                 onActivateAdmin = {
                     val intent = Intent(
                         DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN
@@ -103,6 +98,28 @@ class MainActivity : ComponentActivity() {
                 onRequestCameraPermission = {
                     cameraPermissionRequest.launch(
                         Manifest.permission.CAMERA
+                    )
+                },
+                onStartMonitor = {
+                    val intent = Intent(
+                        this,
+                        UnlockMonitorService::class.java
+                    )
+
+                    try {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                            startForegroundService(intent)
+                        } else {
+                            startService(intent)
+                        }
+                    } catch (exception: Exception) {
+                        monitorError.value =
+                            "monitor_start_failed:${exception.javaClass.simpleName}"
+                    }
+                },
+                onStopMonitor = {
+                    stopService(
+                        Intent(this, UnlockMonitorService::class.java)
                     )
                 }
             )
@@ -152,21 +169,6 @@ class MainActivity : ComponentActivity() {
         ).takeIf { it > 0L }
     }
 
-    private fun startUnlockMonitor() {
-        try {
-            startForegroundService(
-                Intent(this, UnlockMonitorService::class.java)
-            )
-        } catch (exception: Exception) {
-            UnlockMonitorService.lastError.value =
-                "service_start_rejected:${exception.javaClass.simpleName}"
-        }
-    }
-
-    private fun stopUnlockMonitor() {
-        stopService(Intent(this, UnlockMonitorService::class.java))
-    }
-
     private fun loadLastCapture(status: String?): Bitmap? {
         if (status == null || !status.startsWith("success:")) {
             return null
@@ -211,12 +213,13 @@ private fun IntruderProtoApp(
     lastLoginEvent: String?,
     lastCaptureStatus: String?,
     lastCaptureImage: Bitmap?,
+    monitorRunning: Boolean,
     lastUnlockSuccessTime: Long?,
-    unlockMonitorRunning: Boolean,
-    unlockMonitorError: String?,
-    onToggleUnlockMonitor: () -> Unit,
+    monitorError: String?,
     onActivateAdmin: () -> Unit,
-    onRequestCameraPermission: () -> Unit
+    onRequestCameraPermission: () -> Unit,
+    onStartMonitor: () -> Unit,
+    onStopMonitor: () -> Unit
 ) {
     MaterialTheme {
         Surface(
@@ -226,11 +229,9 @@ private fun IntruderProtoApp(
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .systemBarsPadding()
-                    .verticalScroll(rememberScrollState())
                     .padding(24.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Top
+                verticalArrangement = Arrangement.Center
             ) {
                 Text(
                     text = "Intruder Proto",
@@ -276,31 +277,6 @@ private fun IntruderProtoApp(
                 )
 
                 Text(
-                    text = if (lastUnlockSuccessTime != null) {
-                        "Déverrouillage réussi : ${formatTimestamp(lastUnlockSuccessTime)}"
-                    } else {
-                        "Aucun déverrouillage réussi enregistré."
-                    },
-                    modifier = Modifier.padding(top = 16.dp)
-                )
-
-                Text(
-                    text = buildString {
-                        append(
-                            if (unlockMonitorRunning) {
-                                "Écoute du déverrouillage : active."
-                            } else {
-                                "Écoute du déverrouillage : inactive."
-                            }
-                        )
-                        if (unlockMonitorError != null) {
-                            append(" ($unlockMonitorError)")
-                        }
-                    },
-                    modifier = Modifier.padding(top = 16.dp)
-                )
-
-                Text(
                     text = "Résultat de la capture : ${
                         lastCaptureStatus ?: "Aucun essai pour le moment."
                     }",
@@ -325,6 +301,51 @@ private fun IntruderProtoApp(
                     )
                 }
 
+                Text(
+                    text = if (monitorRunning) {
+                        "Surveillance des déverrouillages : active."
+                    } else {
+                        "Surveillance des déverrouillages : arrêtée."
+                    },
+                    modifier = Modifier.padding(top = 24.dp)
+                )
+
+                Text(
+                    text = lastUnlockSuccessTime?.let {
+                        val date = SimpleDateFormat(
+                            "dd/MM/yyyy à HH:mm:ss",
+                            Locale.getDefault()
+                        ).format(Date(it))
+
+                        "Dernier déverrouillage détecté : $date"
+                    } ?: "Aucun déverrouillage détecté pour le moment.",
+                    modifier = Modifier.padding(top = 8.dp)
+                )
+
+                if (monitorError != null) {
+                    Text(
+                        text = "Erreur : $monitorError",
+                        modifier = Modifier.padding(top = 8.dp),
+                        color = MaterialTheme.colorScheme.error
+                    )
+                }
+
+                Button(
+                    onClick = onStartMonitor,
+                    enabled = !monitorRunning,
+                    modifier = Modifier.padding(top = 16.dp)
+                ) {
+                    Text("Démarrer la surveillance")
+                }
+
+                Button(
+                    onClick = onStopMonitor,
+                    enabled = monitorRunning,
+                    modifier = Modifier.padding(top = 8.dp)
+                ) {
+                    Text("Arrêter la surveillance")
+                }
+
                 Button(
                     onClick = onActivateAdmin,
                     modifier = Modifier.padding(top = 24.dp)
@@ -338,24 +359,7 @@ private fun IntruderProtoApp(
                 ) {
                     Text("Autoriser la caméra")
                 }
-
-                Button(
-                    onClick = onToggleUnlockMonitor,
-                    modifier = Modifier.padding(top = 12.dp)
-                ) {
-                    Text(
-                        if (unlockMonitorRunning) {
-                            "Arrêter l'écoute du déverrouillage"
-                        } else {
-                            "Démarrer l'écoute du déverrouillage"
-                        }
-                    )
-                }
             }
         }
     }
 }
-
-private fun formatTimestamp(timestamp: Long): String =
-    SimpleDateFormat("dd/MM/yyyy HH:mm:ss", Locale.getDefault())
-        .format(Date(timestamp))
