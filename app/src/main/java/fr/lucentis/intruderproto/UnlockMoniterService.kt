@@ -1,6 +1,7 @@
 
 package fr.lucentis.intruderproto
 
+import android.Manifest
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -9,6 +10,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
@@ -122,6 +124,8 @@ class UnlockMonitorService : Service() {
                 saveMonitorStatus(STATUS_BROADCAST_RECEIVED)
 
                 Log.i(TAG, STATUS_BROADCAST_RECEIVED)
+
+                startCameraCapture()
             }
         }
 
@@ -141,6 +145,51 @@ class UnlockMonitorService : Service() {
         userPresentReceiver = receiver
 
         Log.i(TAG, "USER_PRESENT receiver registration completed")
+    }
+
+    private fun startCameraCapture() {
+        if (checkSelfPermission(Manifest.permission.CAMERA) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            saveCaptureStatus("permission_missing")
+            return
+        }
+
+        try {
+            val serviceIntent = Intent(
+                this,
+                CameraCaptureService::class.java
+            )
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                startForegroundService(serviceIntent)
+            } else {
+                startService(serviceIntent)
+            }
+
+            saveCaptureStatus("service_requested")
+
+        } catch (exception: Exception) {
+            saveCaptureStatus(
+                "service_start_rejected:${exception.javaClass.simpleName}"
+            )
+        }
+    }
+
+    private fun saveCaptureStatus(status: String) {
+        getSharedPreferences(
+            IntruderDeviceAdminReceiver.PREFERENCES_NAME,
+            Context.MODE_PRIVATE
+        ).edit()
+            .putString(
+                CameraCaptureService.KEY_LAST_CAPTURE_STATUS,
+                status
+            )
+            .putLong(
+                CameraCaptureService.KEY_LAST_CAPTURE_TIME,
+                System.currentTimeMillis()
+            )
+            .apply()
     }
 
     private fun saveMonitorStatus(status: String) {

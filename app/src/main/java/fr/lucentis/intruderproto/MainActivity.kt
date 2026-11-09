@@ -31,9 +31,6 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
 import java.io.File
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 
 class MainActivity : ComponentActivity() {
 
@@ -44,8 +41,6 @@ class MainActivity : ComponentActivity() {
     private val lastCaptureImage = mutableStateOf<Bitmap?>(null)
 
     private val monitorRunning = UnlockMonitorService.running
-    private val lastUnlockSuccessTime =
-        UnlockMonitorService.lastUnlockSuccessTime
     private val monitorError = UnlockMonitorService.lastError
     private val monitorStatus = UnlockMonitorService.lastStatus
 
@@ -77,7 +72,6 @@ class MainActivity : ComponentActivity() {
                 lastCaptureStatus = lastCaptureStatus.value,
                 lastCaptureImage = lastCaptureImage.value,
                 monitorRunning = monitorRunning.value,
-                lastUnlockSuccessTime = lastUnlockSuccessTime.value,
                 monitorError = monitorError.value,
                 monitorStatus = monitorStatus.value,
                 onActivateAdmin = {
@@ -177,16 +171,6 @@ class MainActivity : ComponentActivity() {
         lastCaptureStatus.value = captureStatus
         lastCaptureImage.value = loadLastCapture(captureStatus)
 
-        lastUnlockSuccessTime.value = preferences.getLong(
-            UnlockMonitorService.KEY_LAST_UNLOCK_SUCCESS_TIME,
-            0L
-        ).takeIf { it > 0L }
-
-        monitorRunning.value = preferences.getBoolean(
-            UnlockMonitorService.KEY_MONITOR_RUNNING,
-            false
-        )
-
         val status = preferences.getString(
             UnlockMonitorService.KEY_LAST_MONITOR_STATUS,
             null
@@ -244,7 +228,6 @@ private fun IntruderProtoApp(
     lastCaptureStatus: String?,
     lastCaptureImage: Bitmap?,
     monitorRunning: Boolean,
-    lastUnlockSuccessTime: Long?,
     monitorError: String?,
     monitorStatus: String?,
     onActivateAdmin: () -> Unit,
@@ -345,18 +328,6 @@ private fun IntruderProtoApp(
                     text = "État de débogage : ${
                         monitorStatus ?: "Aucun état enregistré."
                     }",
-                    modifier = Modifier.padding(top = 8.dp)
-                )
-
-                Text(
-                    text = lastUnlockSuccessTime?.let {
-                        val date = SimpleDateFormat(
-                            "dd/MM/yyyy à HH:mm:ss",
-                            Locale.getDefault()
-                        ).format(Date(it))
-
-                        "Dernier déverrouillage réussi : $date"
-                    } ?: "Aucun déverrouillage détecté pour le moment.",
                     modifier = Modifier.padding(top = 8.dp)
                 )
 
