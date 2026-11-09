@@ -20,12 +20,16 @@ class UnlockMonitorService : Service() {
         override fun onReceive(context: Context, intent: Intent) {
             if (intent.action != Intent.ACTION_USER_PRESENT) return
 
+            val now = System.currentTimeMillis()
+
             context.getSharedPreferences(
                 IntruderDeviceAdminReceiver.PREFERENCES_NAME,
                 Context.MODE_PRIVATE
             ).edit()
-                .putLong(KEY_LAST_UNLOCK_SUCCESS_TIME, System.currentTimeMillis())
+                .putLong(KEY_LAST_UNLOCK_SUCCESS_TIME, now)
                 .apply()
+
+            lastUnlockSuccessTime.value = now
         }
     }
 
@@ -116,5 +120,6 @@ class UnlockMonitorService : Service() {
         // Observed directly by the UI; the service and the activity share one process
         val running = mutableStateOf(false)
         val lastError = mutableStateOf<String?>(null)
+        val lastUnlockSuccessTime = mutableStateOf<Long?>(null)
     }
 }

@@ -73,7 +73,8 @@ class MainActivity : ComponentActivity() {
                 lastLoginEvent = lastLoginEvent.value,
                 lastCaptureStatus = lastCaptureStatus.value,
                 lastCaptureImage = lastCaptureImage.value,
-                lastUnlockSuccessTime = lastUnlockSuccessTime.value,
+                lastUnlockSuccessTime = UnlockMonitorService.lastUnlockSuccessTime.value
+                    ?: lastUnlockSuccessTime.value,
                 unlockMonitorRunning = UnlockMonitorService.running.value,
                 unlockMonitorError = UnlockMonitorService.lastError.value,
                 onToggleUnlockMonitor = {
