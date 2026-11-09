@@ -12,6 +12,7 @@ import android.content.IntentFilter
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
+import android.util.Log
 import androidx.compose.runtime.mutableStateOf
 
 class UnlockMonitorService : Service() {
@@ -25,6 +26,8 @@ class UnlockMonitorService : Service() {
         flags: Int,
         startId: Int
     ): Int {
+        Log.i(TAG, "onStartCommand")
+
         try {
             createNotificationChannel()
 
@@ -37,17 +40,16 @@ class UnlockMonitorService : Service() {
                     ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
                 )
             } else {
-                startForeground(
-                    NOTIFICATION_ID,
-                    notification
-                )
+                startForeground(NOTIFICATION_ID, notification)
             }
 
             saveMonitorStatus(STATUS_FOREGROUND_STARTED)
+            Log.i(TAG, STATUS_FOREGROUND_STARTED)
 
             registerUserPresentReceiver()
 
             saveMonitorStatus(STATUS_RECEIVER_REGISTERED)
+            Log.i(TAG, STATUS_RECEIVER_REGISTERED)
 
             val preferences = getSharedPreferences(
                 IntruderDeviceAdminReceiver.PREFERENCES_NAME,
@@ -67,6 +69,8 @@ class UnlockMonitorService : Service() {
             lastError.value = null
 
         } catch (exception: Exception) {
+            Log.e(TAG, "Monitor start failed", exception)
+
             val status =
                 "monitor_start_failed:${exception.javaClass.simpleName}"
 
@@ -90,13 +94,18 @@ class UnlockMonitorService : Service() {
     }
 
     private fun registerUserPresentReceiver() {
-        if (userPresentReceiver != null) return
+        if (userPresentReceiver != null) {
+            Log.i(TAG, "Receiver already registered")
+            return
+        }
 
         val receiver = object : BroadcastReceiver() {
             override fun onReceive(
                 context: Context,
                 intent: Intent
             ) {
+                Log.i(TAG, "Broadcast received: ${intent.action}")
+
                 if (intent.action != Intent.ACTION_USER_PRESENT) return
 
                 val timestamp = System.currentTimeMillis()
@@ -111,6 +120,8 @@ class UnlockMonitorService : Service() {
                 lastUnlockSuccessTime.value = timestamp
 
                 saveMonitorStatus(STATUS_BROADCAST_RECEIVED)
+
+                Log.i(TAG, STATUS_BROADCAST_RECEIVED)
             }
         }
 
@@ -120,7 +131,7 @@ class UnlockMonitorService : Service() {
             registerReceiver(
                 receiver,
                 filter,
-                Context.RECEIVER_NOT_EXPORTED
+                Context.RECEIVER_EXPORTED
             )
         } else {
             @Suppress("DEPRECATION")
@@ -128,6 +139,8 @@ class UnlockMonitorService : Service() {
         }
 
         userPresentReceiver = receiver
+
+        Log.i(TAG, "USER_PRESENT receiver registration completed")
     }
 
     private fun saveMonitorStatus(status: String) {
@@ -152,8 +165,8 @@ class UnlockMonitorService : Service() {
             description = "Service de surveillance des déverrouillages"
         }
 
-        val manager = getSystemService(NotificationManager::class.java)
-        manager.createNotificationChannel(channel)
+        getSystemService(NotificationManager::class.java)
+            .createNotificationChannel(channel)
     }
 
     private fun createNotification(): Notification {
@@ -166,16 +179,17 @@ class UnlockMonitorService : Service() {
     }
 
     override fun onDestroy() {
+        Log.i(TAG, "onDestroy")
+
         userPresentReceiver?.let {
             try {
                 unregisterReceiver(it)
-            } catch (_: Exception) {
-                // Le receiver peut déjà avoir été désenregistré.
+            } catch (exception: Exception) {
+                Log.e(TAG, "Receiver unregister failed", exception)
             }
         }
 
         userPresentReceiver = null
-
         running.value = false
 
         getSharedPreferences(
@@ -189,6 +203,8 @@ class UnlockMonitorService : Service() {
     }
 
     companion object {
+        private const val TAG = "UnlockMonitorService"
+
         const val CHANNEL_ID = "unlock_monitor"
         const val NOTIFICATION_ID = 1002
 
