@@ -12,6 +12,7 @@ import android.content.IntentFilter
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
+import androidx.compose.runtime.mutableStateOf
 
 class UnlockMonitorService : Service() {
 
@@ -27,20 +28,26 @@ class UnlockMonitorService : Service() {
         try {
             createNotificationChannel()
 
+            val notification = createNotification()
+
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
                 startForeground(
                     NOTIFICATION_ID,
-                    createNotification(),
+                    notification,
                     ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
                 )
             } else {
                 startForeground(
                     NOTIFICATION_ID,
-                    createNotification()
+                    notification
                 )
             }
 
+            saveMonitorStatus(STATUS_FOREGROUND_STARTED)
+
             registerUserPresentReceiver()
+
+            saveMonitorStatus(STATUS_RECEIVER_REGISTERED)
 
             val preferences = getSharedPreferences(
                 IntruderDeviceAdminReceiver.PREFERENCES_NAME,
@@ -52,13 +59,28 @@ class UnlockMonitorService : Service() {
                 0L
             ).takeIf { it > 0L }
 
+            preferences.edit()
+                .putBoolean(KEY_MONITOR_RUNNING, true)
+                .apply()
+
             running.value = true
             lastError.value = null
 
         } catch (exception: Exception) {
-            running.value = false
-            lastError.value =
+            val status =
                 "monitor_start_failed:${exception.javaClass.simpleName}"
+
+            saveMonitorStatus(status)
+
+            lastError.value = status
+            running.value = false
+
+            getSharedPreferences(
+                IntruderDeviceAdminReceiver.PREFERENCES_NAME,
+                Context.MODE_PRIVATE
+            ).edit()
+                .putBoolean(KEY_MONITOR_RUNNING, false)
+                .apply()
 
             stopSelf()
             return START_NOT_STICKY
@@ -71,7 +93,6 @@ class UnlockMonitorService : Service() {
         if (userPresentReceiver != null) return
 
         val receiver = object : BroadcastReceiver() {
-
             override fun onReceive(
                 context: Context,
                 intent: Intent
@@ -88,6 +109,8 @@ class UnlockMonitorService : Service() {
                     .apply()
 
                 lastUnlockSuccessTime.value = timestamp
+
+                saveMonitorStatus(STATUS_BROADCAST_RECEIVED)
             }
         }
 
@@ -107,30 +130,36 @@ class UnlockMonitorService : Service() {
         userPresentReceiver = receiver
     }
 
-    private fun createNotificationChannel() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                CHANNEL_ID,
-                "Surveillance des déverrouillages",
-                NotificationManager.IMPORTANCE_LOW
-            )
+    private fun saveMonitorStatus(status: String) {
+        lastStatus.value = status
 
-            getSystemService(NotificationManager::class.java)
-                .createNotificationChannel(channel)
+        getSharedPreferences(
+            IntruderDeviceAdminReceiver.PREFERENCES_NAME,
+            Context.MODE_PRIVATE
+        ).edit()
+            .putString(KEY_LAST_MONITOR_STATUS, status)
+            .apply()
+    }
+
+    private fun createNotificationChannel() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+
+        val channel = NotificationChannel(
+            CHANNEL_ID,
+            "Intruder Proto",
+            NotificationManager.IMPORTANCE_LOW
+        ).apply {
+            description = "Service de surveillance des déverrouillages"
         }
+
+        val manager = getSystemService(NotificationManager::class.java)
+        manager.createNotificationChannel(channel)
     }
 
     private fun createNotification(): Notification {
-        val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            Notification.Builder(this, CHANNEL_ID)
-        } else {
-            @Suppress("DEPRECATION")
-            Notification.Builder(this)
-        }
-
-        return builder
+        return Notification.Builder(this, CHANNEL_ID)
             .setContentTitle("Intruder Proto")
-            .setContentText("Écoute des déverrouillages active")
+            .setContentText("Surveillance des déverrouillages en cours")
             .setSmallIcon(android.R.drawable.ic_lock_idle_lock)
             .setOngoing(true)
             .build()
@@ -138,32 +167,52 @@ class UnlockMonitorService : Service() {
 
     override fun onDestroy() {
         userPresentReceiver?.let {
-            unregisterReceiver(it)
+            try {
+                unregisterReceiver(it)
+            } catch (_: Exception) {
+                // Le receiver peut déjà avoir été désenregistré.
+            }
         }
 
         userPresentReceiver = null
+
         running.value = false
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-            stopForeground(STOP_FOREGROUND_REMOVE)
-        } else {
-            @Suppress("DEPRECATION")
-            stopForeground(true)
-        }
+        getSharedPreferences(
+            IntruderDeviceAdminReceiver.PREFERENCES_NAME,
+            Context.MODE_PRIVATE
+        ).edit()
+            .putBoolean(KEY_MONITOR_RUNNING, false)
+            .apply()
 
         super.onDestroy()
     }
 
     companion object {
-        private const val CHANNEL_ID = "unlock_monitor"
-        private const val NOTIFICATION_ID = 1002
+        const val CHANNEL_ID = "unlock_monitor"
+        const val NOTIFICATION_ID = 1002
 
         const val KEY_LAST_UNLOCK_SUCCESS_TIME =
             "last_unlock_success_time"
 
-        val running = androidx.compose.runtime.mutableStateOf(false)
-        val lastError = androidx.compose.runtime.mutableStateOf<String?>(null)
-        val lastUnlockSuccessTime =
-            androidx.compose.runtime.mutableStateOf<Long?>(null)
+        const val KEY_LAST_MONITOR_STATUS =
+            "last_monitor_status"
+
+        const val KEY_MONITOR_RUNNING =
+            "monitor_running"
+
+        const val STATUS_FOREGROUND_STARTED =
+            "foreground_started"
+
+        const val STATUS_RECEIVER_REGISTERED =
+            "receiver_registered"
+
+        const val STATUS_BROADCAST_RECEIVED =
+            "broadcast_received"
+
+        val running = mutableStateOf(false)
+        val lastError = mutableStateOf<String?>(null)
+        val lastStatus = mutableStateOf<String?>(null)
+        val lastUnlockSuccessTime = mutableStateOf<Long?>(null)
     }
 }

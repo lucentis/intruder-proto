@@ -8,7 +8,6 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
-import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -48,6 +47,7 @@ class MainActivity : ComponentActivity() {
     private val lastUnlockSuccessTime =
         UnlockMonitorService.lastUnlockSuccessTime
     private val monitorError = UnlockMonitorService.lastError
+    private val monitorStatus = UnlockMonitorService.lastStatus
 
     private val adminRequest = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -79,6 +79,7 @@ class MainActivity : ComponentActivity() {
                 monitorRunning = monitorRunning.value,
                 lastUnlockSuccessTime = lastUnlockSuccessTime.value,
                 monitorError = monitorError.value,
+                monitorStatus = monitorStatus.value,
                 onActivateAdmin = {
                     val intent = Intent(
                         DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN
@@ -107,14 +108,27 @@ class MainActivity : ComponentActivity() {
                     )
 
                     try {
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                            startForegroundService(intent)
-                        } else {
-                            startService(intent)
-                        }
+                        startForegroundService(intent)
                     } catch (exception: Exception) {
-                        monitorError.value =
+                        val status =
                             "monitor_start_failed:${exception.javaClass.simpleName}"
+
+                        monitorError.value = status
+                        monitorStatus.value = status
+
+                        getSharedPreferences(
+                            IntruderDeviceAdminReceiver.PREFERENCES_NAME,
+                            MODE_PRIVATE
+                        ).edit()
+                            .putString(
+                                UnlockMonitorService.KEY_LAST_MONITOR_STATUS,
+                                status
+                            )
+                            .putBoolean(
+                                UnlockMonitorService.KEY_MONITOR_RUNNING,
+                                false
+                            )
+                            .apply()
                     }
                 },
                 onStopMonitor = {
@@ -167,6 +181,22 @@ class MainActivity : ComponentActivity() {
             UnlockMonitorService.KEY_LAST_UNLOCK_SUCCESS_TIME,
             0L
         ).takeIf { it > 0L }
+
+        monitorRunning.value = preferences.getBoolean(
+            UnlockMonitorService.KEY_MONITOR_RUNNING,
+            false
+        )
+
+        val status = preferences.getString(
+            UnlockMonitorService.KEY_LAST_MONITOR_STATUS,
+            null
+        )
+
+        monitorStatus.value = status
+
+        monitorError.value = status?.takeIf {
+            it.startsWith("monitor_start_failed:")
+        }
     }
 
     private fun loadLastCapture(status: String?): Bitmap? {
@@ -216,6 +246,7 @@ private fun IntruderProtoApp(
     monitorRunning: Boolean,
     lastUnlockSuccessTime: Long?,
     monitorError: String?,
+    monitorStatus: String?,
     onActivateAdmin: () -> Unit,
     onRequestCameraPermission: () -> Unit,
     onStartMonitor: () -> Unit,
@@ -311,13 +342,20 @@ private fun IntruderProtoApp(
                 )
 
                 Text(
+                    text = "État de débogage : ${
+                        monitorStatus ?: "Aucun état enregistré."
+                    }",
+                    modifier = Modifier.padding(top = 8.dp)
+                )
+
+                Text(
                     text = lastUnlockSuccessTime?.let {
                         val date = SimpleDateFormat(
                             "dd/MM/yyyy à HH:mm:ss",
                             Locale.getDefault()
                         ).format(Date(it))
 
-                        "Dernier déverrouillage détecté : $date"
+                        "Dernier déverrouillage réussi : $date"
                     } ?: "Aucun déverrouillage détecté pour le moment.",
                     modifier = Modifier.padding(top = 8.dp)
                 )
