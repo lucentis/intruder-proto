@@ -107,6 +107,13 @@ class FailedUnlockCaptureService : Service() {
             .build()
     }
 
+    override fun onDestroy() {
+        cameraCapture?.cancel()
+        cameraCapture = null
+
+        super.onDestroy()
+    }
+
     companion object {
         private const val CHANNEL_ID = "intruder_camera"
         private const val NOTIFICATION_ID = 1001
