@@ -14,12 +14,12 @@ import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
-import android.util.Log
 import androidx.compose.runtime.mutableStateOf
 
 class UnlockMonitorService : Service() {
 
     private var userPresentReceiver: BroadcastReceiver? = null
+    private var cameraCapture: CameraCapture? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -28,30 +28,53 @@ class UnlockMonitorService : Service() {
         flags: Int,
         startId: Int
     ): Int {
-        Log.i(TAG, "onStartCommand")
-
         try {
             createNotificationChannel()
 
             val notification = createNotification()
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                val foregroundTypes =
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE or
+                    if (
+                        checkSelfPermission(Manifest.permission.CAMERA) ==
+                        PackageManager.PERMISSION_GRANTED
+                    ) {
+                        ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA
+                    } else {
+                        0
+                    }
+
                 startForeground(
                     NOTIFICATION_ID,
                     notification,
-                    ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+                    foregroundTypes
+                )
+            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                val foregroundTypes =
+                    if (
+                        checkSelfPermission(Manifest.permission.CAMERA) ==
+                        PackageManager.PERMISSION_GRANTED
+                    ) {
+                        ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA
+                    } else {
+                        0
+                    }
+
+                startForeground(
+                    NOTIFICATION_ID,
+                    notification,
+                    foregroundTypes
                 )
             } else {
                 startForeground(NOTIFICATION_ID, notification)
             }
 
             saveMonitorStatus(STATUS_FOREGROUND_STARTED)
-            Log.i(TAG, STATUS_FOREGROUND_STARTED)
 
             registerUserPresentReceiver()
 
             saveMonitorStatus(STATUS_RECEIVER_REGISTERED)
-            Log.i(TAG, STATUS_RECEIVER_REGISTERED)
 
             val preferences = getSharedPreferences(
                 IntruderDeviceAdminReceiver.PREFERENCES_NAME,
@@ -71,8 +94,6 @@ class UnlockMonitorService : Service() {
             lastError.value = null
 
         } catch (exception: Exception) {
-            Log.e(TAG, "Monitor start failed", exception)
-
             val status =
                 "monitor_start_failed:${exception.javaClass.simpleName}"
 
@@ -96,18 +117,13 @@ class UnlockMonitorService : Service() {
     }
 
     private fun registerUserPresentReceiver() {
-        if (userPresentReceiver != null) {
-            Log.i(TAG, "Receiver already registered")
-            return
-        }
+        if (userPresentReceiver != null) return
 
         val receiver = object : BroadcastReceiver() {
             override fun onReceive(
                 context: Context,
                 intent: Intent
             ) {
-                Log.i(TAG, "Broadcast received: ${intent.action}")
-
                 if (intent.action != Intent.ACTION_USER_PRESENT) return
 
                 val timestamp = System.currentTimeMillis()
@@ -122,8 +138,6 @@ class UnlockMonitorService : Service() {
                 lastUnlockSuccessTime.value = timestamp
 
                 saveMonitorStatus(STATUS_BROADCAST_RECEIVED)
-
-                Log.i(TAG, STATUS_BROADCAST_RECEIVED)
 
                 startCameraCapture()
             }
@@ -143,8 +157,6 @@ class UnlockMonitorService : Service() {
         }
 
         userPresentReceiver = receiver
-
-        Log.i(TAG, "USER_PRESENT receiver registration completed")
     }
 
     private fun startCameraCapture() {
@@ -155,23 +167,24 @@ class UnlockMonitorService : Service() {
             return
         }
 
-        try {
-            val serviceIntent = Intent(
-                this,
-                CameraCaptureService::class.java
-            )
+        if (cameraCapture != null) {
+            saveCaptureStatus("capture_already_running")
+            return
+        }
 
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                startForegroundService(serviceIntent)
-            } else {
-                startService(serviceIntent)
+        try {
+            cameraCapture = CameraCapture(this) { result ->
+                saveCaptureStatus(result)
+                cameraCapture = null
             }
 
-            saveCaptureStatus("service_requested")
+            cameraCapture?.start()
 
         } catch (exception: Exception) {
+            cameraCapture = null
+
             saveCaptureStatus(
-                "service_start_rejected:${exception.javaClass.simpleName}"
+                "capture_start_failed:${exception.javaClass.simpleName}"
             )
         }
     }
@@ -182,11 +195,11 @@ class UnlockMonitorService : Service() {
             Context.MODE_PRIVATE
         ).edit()
             .putString(
-                CameraCaptureService.KEY_LAST_CAPTURE_STATUS,
+                FailedUnlockCaptureService.KEY_LAST_CAPTURE_STATUS,
                 status
             )
             .putLong(
-                CameraCaptureService.KEY_LAST_CAPTURE_TIME,
+                FailedUnlockCaptureService.KEY_LAST_CAPTURE_TIME,
                 System.currentTimeMillis()
             )
             .apply()
@@ -219,7 +232,14 @@ class UnlockMonitorService : Service() {
     }
 
     private fun createNotification(): Notification {
-        return Notification.Builder(this, CHANNEL_ID)
+        val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            Notification.Builder(this, CHANNEL_ID)
+        } else {
+            @Suppress("DEPRECATION")
+            Notification.Builder(this)
+        }
+
+        return builder
             .setContentTitle("Intruder Proto")
             .setContentText("Surveillance des déverrouillages en cours")
             .setSmallIcon(android.R.drawable.ic_lock_idle_lock)
@@ -228,17 +248,19 @@ class UnlockMonitorService : Service() {
     }
 
     override fun onDestroy() {
-        Log.i(TAG, "onDestroy")
-
         userPresentReceiver?.let {
             try {
                 unregisterReceiver(it)
-            } catch (exception: Exception) {
-                Log.e(TAG, "Receiver unregister failed", exception)
+            } catch (_: Exception) {
+                // Le receiver peut déjà être désenregistré.
             }
         }
 
         userPresentReceiver = null
+
+        cameraCapture?.cancel()
+        cameraCapture = null
+
         running.value = false
 
         getSharedPreferences(

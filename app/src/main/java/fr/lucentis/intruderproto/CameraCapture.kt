@@ -1,15 +1,7 @@
 
 package fr.lucentis.intruderproto
 
-import android.Manifest
-import android.app.Notification
-import android.app.NotificationChannel
-import android.app.NotificationManager
-import android.app.Service
 import android.content.Context
-import android.content.Intent
-import android.content.pm.PackageManager
-import android.content.pm.ServiceInfo
 import android.graphics.ImageFormat
 import android.hardware.camera2.CameraCaptureSession
 import android.hardware.camera2.CameraCharacteristics
@@ -19,15 +11,18 @@ import android.hardware.camera2.CaptureRequest
 import android.hardware.camera2.CameraCaptureSession.CaptureCallback
 import android.hardware.camera2.CaptureFailure
 import android.media.ImageReader
-import android.os.Build
 import android.os.Handler
 import android.os.HandlerThread
-import android.os.IBinder
 import java.io.File
 import java.io.FileOutputStream
 import java.util.concurrent.atomic.AtomicBoolean
 
-class CameraCaptureService : Service() {
+class CameraCapture(
+    context: Context,
+    private val onFinished: (String) -> Unit
+) {
+
+    private val appContext = context.applicationContext
 
     private var cameraThread: HandlerThread? = null
     private var cameraHandler: Handler? = null
@@ -38,40 +33,9 @@ class CameraCaptureService : Service() {
 
     private val finished = AtomicBoolean(false)
 
-    override fun onBind(intent: Intent?): IBinder? = null
+    fun start() {
+        if (finished.get()) return
 
-    override fun onStartCommand(
-        intent: Intent?,
-        flags: Int,
-        startId: Int
-    ): Int {
-
-        if (checkSelfPermission(Manifest.permission.CAMERA) !=
-            PackageManager.PERMISSION_GRANTED
-        ) {
-            finish("permission_missing")
-            return START_NOT_STICKY
-        }
-
-        try {
-            createNotificationChannel()
-
-            startForeground(
-                NOTIFICATION_ID,
-                createNotification(),
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA
-            )
-        } catch (exception: Exception) {
-            finish("foreground_service_rejected:${exception.javaClass.simpleName}")
-            return START_NOT_STICKY
-        }
-
-        startCameraCapture()
-
-        return START_NOT_STICKY
-    }
-
-    private fun startCameraCapture() {
         cameraThread = HandlerThread("IntruderCameraThread").apply {
             start()
         }
@@ -79,7 +43,8 @@ class CameraCaptureService : Service() {
         cameraHandler = Handler(cameraThread!!.looper)
 
         try {
-            val cameraManager = getSystemService(CameraManager::class.java)
+            val cameraManager =
+                appContext.getSystemService(CameraManager::class.java)
 
             val cameraId = cameraManager.cameraIdList.firstOrNull { id ->
                 cameraManager.getCameraCharacteristics(id)
@@ -129,7 +94,7 @@ class CameraCaptureService : Service() {
                     val bytes = ByteArray(buffer.remaining())
                     buffer.get(bytes)
 
-                    val directory = File(filesDir, "captures")
+                    val directory = File(appContext.filesDir, "captures")
                     directory.mkdirs()
 
                     val file = File(
@@ -154,6 +119,11 @@ class CameraCaptureService : Service() {
                 object : CameraDevice.StateCallback() {
 
                     override fun onOpened(camera: CameraDevice) {
+                        if (finished.get()) {
+                            camera.close()
+                            return
+                        }
+
                         cameraDevice = camera
                         createCaptureSession(camera)
                     }
@@ -181,7 +151,13 @@ class CameraCaptureService : Service() {
         }
     }
 
+    fun cancel() {
+        finish("capture_cancelled")
+    }
+
     private fun createCaptureSession(camera: CameraDevice) {
+        if (finished.get()) return
+
         val reader = imageReader ?: run {
             finish("image_reader_unavailable")
             return
@@ -195,6 +171,11 @@ class CameraCaptureService : Service() {
                     override fun onConfigured(
                         session: CameraCaptureSession
                     ) {
+                        if (finished.get()) {
+                            session.close()
+                            return
+                        }
+
                         captureSession = session
 
                         try {
@@ -246,14 +227,6 @@ class CameraCaptureService : Service() {
     private fun finish(result: String) {
         if (!finished.compareAndSet(false, true)) return
 
-        getSharedPreferences(
-            IntruderDeviceAdminReceiver.PREFERENCES_NAME,
-            Context.MODE_PRIVATE
-        ).edit()
-            .putString(KEY_LAST_CAPTURE_STATUS, result)
-            .putLong(KEY_LAST_CAPTURE_TIME, System.currentTimeMillis())
-            .apply()
-
         captureSession?.close()
         captureSession = null
 
@@ -263,59 +236,10 @@ class CameraCaptureService : Service() {
         imageReader?.close()
         imageReader = null
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-            stopForeground(STOP_FOREGROUND_REMOVE)
-        } else {
-            @Suppress("DEPRECATION")
-            stopForeground(true)
-        }
-
-        stopSelf()
-
         cameraThread?.quitSafely()
         cameraThread = null
         cameraHandler = null
-    }
 
-    private fun createNotificationChannel() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                CHANNEL_ID,
-                "Capture de sécurité",
-                NotificationManager.IMPORTANCE_LOW
-            )
-
-            getSystemService(NotificationManager::class.java)
-                .createNotificationChannel(channel)
-        }
-    }
-
-    private fun createNotification(): Notification {
-        val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            Notification.Builder(this, CHANNEL_ID)
-        } else {
-            @Suppress("DEPRECATION")
-            Notification.Builder(this)
-        }
-
-        return builder
-            .setContentTitle("Intruder Proto")
-            .setContentText("Capture de sécurité en cours")
-            .setSmallIcon(android.R.drawable.ic_menu_camera)
-            .setOngoing(true)
-            .build()
-    }
-
-    override fun onDestroy() {
-        cameraThread?.quitSafely()
-        super.onDestroy()
-    }
-
-    companion object {
-        private const val CHANNEL_ID = "intruder_camera"
-        private const val NOTIFICATION_ID = 1001
-
-        const val KEY_LAST_CAPTURE_STATUS = "last_capture_status"
-        const val KEY_LAST_CAPTURE_TIME = "last_capture_time"
+        onFinished(result)
     }
 }

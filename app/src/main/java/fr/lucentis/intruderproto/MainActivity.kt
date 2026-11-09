@@ -164,7 +164,7 @@ class MainActivity : ComponentActivity() {
         )
 
         val captureStatus = preferences.getString(
-            CameraCaptureService.KEY_LAST_CAPTURE_STATUS,
+            FailedUnlockCaptureService.KEY_LAST_CAPTURE_STATUS,
             null
         )
 

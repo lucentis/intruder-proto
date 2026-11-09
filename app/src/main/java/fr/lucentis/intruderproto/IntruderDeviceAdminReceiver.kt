@@ -1,3 +1,4 @@
+
 package fr.lucentis.intruderproto
 
 import android.Manifest
@@ -38,7 +39,7 @@ class IntruderDeviceAdminReceiver : DeviceAdminReceiver() {
         try {
             val serviceIntent = Intent(
                 context,
-                CameraCaptureService::class.java
+                FailedUnlockCaptureService::class.java
             )
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -75,11 +76,11 @@ class IntruderDeviceAdminReceiver : DeviceAdminReceiver() {
             Context.MODE_PRIVATE
         ).edit()
             .putString(
-                CameraCaptureService.KEY_LAST_CAPTURE_STATUS,
+                FailedUnlockCaptureService.KEY_LAST_CAPTURE_STATUS,
                 status
             )
             .putLong(
-                CameraCaptureService.KEY_LAST_CAPTURE_TIME,
+                FailedUnlockCaptureService.KEY_LAST_CAPTURE_TIME,
                 System.currentTimeMillis()
             )
             .apply()
